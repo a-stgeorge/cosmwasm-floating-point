@@ -4,7 +4,8 @@ version = "0.1.0"
 authors = ["Aidan St. George <aidanstgeorge1@gmail.com>"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 forward_ref = "1.0.0"
