@@ -342,19 +342,19 @@ impl Float {
         }
     }
 
-    pub fn max(self, other: Self) -> Self {
-        if self > other {
-            self
+    pub fn max(val1: Self, val2: Self) -> Self {
+        if val1 > val2 {
+            val1
         } else {
-            other
+            val2
         }
     }
 
-    pub fn min(self, other: Self) -> Self {
-        if self > other {
-            other
+    pub fn min(val1: Self, val2: Self) -> Self {
+        if val1 < val2 {
+            val1
         } else {
-            self
+            val2
         }
     }
 
