@@ -342,6 +342,22 @@ impl Float {
         }
     }
 
+    pub fn max(self, other: Self) -> Self {
+        if self > other {
+            self
+        } else {
+            other
+        }
+    }
+
+    pub fn min(self, other: Self) -> Self {
+        if self > other {
+            other
+        } else {
+            self
+        }
+    }
+
     pub fn abs_diff(self, other: Self) -> Self {
         if self > other {
             self - other
