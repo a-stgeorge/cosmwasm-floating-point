@@ -10,7 +10,8 @@ use cosmwasm_std::{
     Isqrt,
     OverflowError, 
     OverflowOperation, 
-    Uint128
+    Uint128,
+    Uint256,
 };
 
 // TODO:
@@ -143,15 +144,6 @@ impl Float {
 
     pub fn from_int(value: u128) -> Self {
         Self::new(value, 0).unwrap_or_default() // Should never Err, given value is limited to u128
-    }
-
-    pub fn from_uint(value: Uint128) -> Self {
-        Self::from_int(value.u128())
-    }
-
-    pub fn from_decimal(value: Decimal) -> Self {
-        Self::new(value.atomics().u128(), -(value.decimal_places() as i32)).unwrap_or_default() 
-            // Should never Err, Decimal's range is limited
     }
 
     // Will not produce exact result (due to f64 precision)
@@ -599,6 +591,68 @@ impl fmt::Display for Float {
     }
 }
 
+impl From<Uint128> for Float {
+    fn from(val: Uint128) -> Self {
+        Self::from_int(val.u128())
+    }
+}
+
+impl From<Uint256> for Float {
+    fn from(val: Uint256) -> Self {
+        match Uint128::try_from(val) {
+            Ok(value) => Self::from(value),
+            Err(_) => {
+                let mut exp = 0i32;
+                let mut adjusted_value = val;
+                while adjusted_value > Uint128::MAX.into() {
+                    adjusted_value = adjusted_value / Uint256::from(10u128);
+                    exp += 1;
+                }
+                Self::new_uint(Uint128::try_from(adjusted_value).unwrap_or_default(), exp)
+                    .unwrap_or_default() // Range of Uint256 will not cause overflow
+            },
+        }
+    }
+}
+
+impl From<Decimal> for Float {
+    fn from(val: Decimal) -> Self {
+        Self::new(val.atomics().u128(), -(val.decimal_places() as i32)).unwrap_or_default() 
+            // Should never Err, Decimal's range is limited
+    }
+}
+
+impl From<u128> for Float {
+    fn from(val: u128) -> Self {
+        Self::from_int(val)
+    }
+}
+
+impl From<u64> for Float {
+    fn from(val: u64) -> Self {
+        Self::from_int(val.into())
+    }
+}
+
+impl From<u32> for Float {
+    fn from(val: u32) -> Self {
+        Self::from_int(val.into())
+    }
+}
+
+impl From<f64> for Float {
+    fn from(val: f64) -> Self {
+        Self::from_float(val)
+    }
+}
+
+impl From<f32> for Float {
+    fn from(val: f32) -> Self {
+        Self::from_float(val.into())
+    }
+}
+
+
 impl Add for Float {
     type Output = Self;
     
@@ -832,7 +886,7 @@ mod tests {
             550,
         );
         assert_eq!(Float::from_float(-1000.001), Float::zero());
-        assert_eq!(Float::from_float(0.0), Float::zero());
+        assert_eq!(Float::from(0.0), Float::zero());
         approx_eq(
             Float::from_float(0.0000001234567890123456789111), 
             Float::no_fix(1_234_567_890_123_456_789, -7),
@@ -895,21 +949,30 @@ mod tests {
         assert_eq!(Float::new_uint(Uint128::new(17), 32).unwrap(), Float::no_fix(1_700_000_000_000_000_000, 33));
         assert_eq!(Float::new_uint(Uint128::new(0), 17).unwrap(), Float::zero());
         assert_eq!(Float::new_uint(Uint128::new(17), i32::MAX), Err(FloatRangeExceeded));
-        assert_eq!(Float::new_uint(Uint128::new(u128::MAX), 17).unwrap(), Float::no_fix(3_402_823_669_209_384_634, 55));
+        assert_eq!(Float::new_uint(Uint128::MAX, 17).unwrap(), Float::no_fix(3_402_823_669_209_384_634, 55));
 
-        assert_eq!(Float::from_uint(Uint128::new(5)), Float::no_fix(5_000_000_000_000_000_000, 0));
-        assert_eq!(Float::from_uint(Uint128::new(123_456_789)), Float::no_fix(1_234_567_890_000_000_000, 8));
-        assert_eq!(Float::from_uint(Uint128::new(0)), Float::no_fix(0, 0)); // 0's exponent must be 0
+        assert_eq!(Float::from(Uint128::new(5)), Float::no_fix(5_000_000_000_000_000_000, 0));
+        assert_eq!(Float::from(Uint128::new(123_456_789)), Float::no_fix(1_234_567_890_000_000_000, 8));
+        assert_eq!(Float::from(Uint128::new(0)), Float::no_fix(0, 0)); // 0's exponent must be 0
         assert_eq!(
-            Float::from_uint(Uint128::new(100_000_000_000_000_000_000_000_000_000_000_000_000u128)),
+            Float::from(Uint128::new(100_000_000_000_000_000_000_000_000_000_000_000_000u128)),
             Float::new(1, 38).unwrap(),
         );
 
-        assert_eq!(Float::from_decimal(Decimal::percent(100)), Float::new(1, 0).unwrap());
-        assert_eq!(Float::from_decimal(Decimal::percent(1)), Float::new(1, -2).unwrap());
-        assert_eq!(Float::from_decimal(Decimal::from_atomics(1234u128, 5).unwrap()), Float::new(1234, -5).unwrap());
-        assert_eq!(Float::from_decimal(Decimal::zero()), Float::zero());
-        assert_eq!(Float::from_decimal(Decimal::MAX), Float::new(u128::MAX, -18).unwrap());
+        assert_eq!(Float::from(Uint256::from(5u128)), Float::no_fix(5_000_000_000_000_000_000, 0));
+        assert_eq!(Float::from(Uint256::from(123_456_789u128)), Float::no_fix(1_234_567_890_000_000_000, 8));
+        assert_eq!(Float::from(Uint256::from(0u128)), Float::no_fix(0, 0)); // 0's exponent must be 0
+        assert_eq!(
+            Float::from(Uint256::from(100_000_000_000_000_000_000_000_000_000_000_000_000u128)),
+            Float::new(1, 38).unwrap(),
+        );
+        assert_eq!(Float::from(Uint256::MAX), Float::no_fix(1_157_920_892_373_161_954, 77));
+
+        assert_eq!(Float::from(Decimal::percent(100)), Float::new(1, 0).unwrap());
+        assert_eq!(Float::from(Decimal::percent(1)), Float::new(1, -2).unwrap());
+        assert_eq!(Float::from(Decimal::from_atomics(1234u128, 5).unwrap()), Float::new(1234, -5).unwrap());
+        assert_eq!(Float::from(Decimal::zero()), Float::zero());
+        assert_eq!(Float::from(Decimal::MAX), Float::new(u128::MAX, -18).unwrap());
     }
 
     #[test]
@@ -1134,7 +1197,7 @@ mod tests {
         assert_eq!(pow(Float::zero(), 0), Float::one());
         assert_eq!(pow(Float::from_int(17), 0), Float::one());
 
-        assert_eq!(pow(Float::from_int(2), -1), Float::from_float(0.5));
+        assert_eq!(pow(Float::from_int(2), -1), Float::from(0.5));
         assert_eq!(pow(Float::from_int(2), -17), Float::no_fix(7_629_394_531_250_000_000, -6));
         assert_eq!(pow(Float::from_int(17), -17), Float::no_fix(1_208_838_648_302_396_713, -21));
         approx_eq(pow(Float::from_int(17), -314), Float::no_fix(4_355_506_710_815_929_287, -387), 25);
@@ -1178,8 +1241,8 @@ mod tests {
             Float::new(1, -0).unwrap(),
         );
         assert_eq!(Float::MAX / Float::MAX, Float::one());
-        assert_eq!(Float::one() / Float::from_float(0.01), Float::from_int(100));
-        approx_eq((Float::MAX / Float::from_int(2)) / Float::from_float(0.5), Float::MAX, 1); // Division rounding
+        assert_eq!(Float::one() / Float::from(0.01), Float::from_int(100));
+        approx_eq((Float::MAX / Float::from_int(2)) / Float::from(0.5), Float::MAX, 1); // Division rounding
         assert_eq!((Float::MIN * Float::from_int(2)) / Float::from_int(2), Float::MIN); // slight bug
 
         // Checked tests
@@ -1201,8 +1264,8 @@ mod tests {
             Float::new(1, -0).unwrap(),
         );
         assert_eq!(Float::MAX.checked_div(Float::MAX).unwrap(), Float::one());
-        assert_eq!(Float::one().checked_div(Float::from_float(0.01)).unwrap(), Float::from_int(100));
-        approx_eq((Float::MAX / Float::from_int(2)).checked_div(Float::from_float(0.5)).unwrap(), Float::MAX, 1); // Division rounding
+        assert_eq!(Float::one().checked_div(Float::from(0.01)).unwrap(), Float::from_int(100));
+        approx_eq((Float::MAX / Float::from_int(2)).checked_div(Float::from(0.5)).unwrap(), Float::MAX, 1); // Division rounding
         assert_eq!((Float::MIN * Float::from_int(2)).checked_div(Float::from_int(2)).unwrap(), Float::MIN); // slight bug
     }
 
@@ -1217,8 +1280,8 @@ mod tests {
         test_int(57843290, 1000, 290, rem);
         
         approx_eq(
-            Float::from_float(65743829.5432) % Float::from_float(0.1),
-            Float::from_float(0.0432),
+            Float::from(65743829.5432) % Float::from_float(0.1),
+            Float::from(0.0432),
             1000,
         );
 
