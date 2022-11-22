@@ -5,6 +5,7 @@ use thiserror::Error;
 
 use cosmwasm_std::{
     CheckedFromRatioError, 
+    ConversionOverflowError,
     DivideByZeroError, 
     Decimal,
     Isqrt,
@@ -304,8 +305,9 @@ impl Float {
         self.significand
     }
     
+    // Returns actual exponent based on significand, not stored value
     pub fn exponent(&self) -> i32 {
-        self.exponent
+        self.exponent - Self::DIGITS
     }
 
     pub fn is_zero(&self) -> bool {
@@ -668,6 +670,74 @@ impl From<f32> for Float {
     }
 }
 
+impl TryFrom<Float> for Uint128 {
+    type Error = ConversionOverflowError;
+
+    fn try_from(value: Float) -> Result<Uint128, ConversionOverflowError> {
+        if value > Float::from(Uint128::MAX) {
+            return Err(ConversionOverflowError::new("Float", "Uint128", value.to_string()))
+        } else if value < Float::one() {
+            return Ok(Uint128::zero())
+        }
+
+        if value.exponent() > 0 {
+            Ok(Uint128::from(value.significand() * pow10(value.exponent() as u32)))
+        } else if value.exponent() < 0 {
+            Ok(Uint128::from(value.significand() / pow10(-value.exponent() as u32)))
+        } else {
+            Ok(Uint128::from(value.significand()))
+        }
+    }
+}
+
+impl TryFrom<Float> for Uint256 {
+    type Error = ConversionOverflowError;
+
+    fn try_from(value: Float) -> Result<Uint256, ConversionOverflowError> {
+        if value > Float::from(Uint256::MAX) {
+            return Err(ConversionOverflowError::new("Float", "Uint256", value.to_string()))
+        } else if value < Float::one() {
+            return Ok(Uint256::zero())
+        }
+
+        if value.exponent() > 0 {
+            Ok(Uint256::from(value.significand()) 
+               * Uint256::from(10u128).pow(value.exponent() as u32))
+        } else if value.exponent() < 0 {
+            Ok(Uint256::from(value.significand()) 
+               / Uint256::from(10u128).pow(-value.exponent() as u32))
+        } else {
+            Ok(Uint256::from(value.significand()))
+        }
+    }
+}
+
+impl TryFrom<Float> for u128 {
+    type Error = ConversionOverflowError;
+
+    fn try_from(value: Float) -> Result<u128, ConversionOverflowError> {
+        if value > Float::from(u128::MAX) {
+            return Err(ConversionOverflowError::new("Float", "u128", value.to_string()))
+        } else if value < Float::one() {
+            return Ok(0)
+        }
+
+        if value.exponent() > 0 {
+            Ok(value.significand() * pow10(value.exponent() as u32))
+        } else if value.exponent() < 0 {
+            Ok(value.significand() / pow10(-value.exponent() as u32))
+        } else {
+            Ok(value.significand())
+        }
+    }
+}
+
+impl From<Float> for f64 {
+    fn from(value: Float) -> f64 {
+        // No overflow for float type (becomes NaN, 0 or inf)
+        (value.significand() as f64) * (10f64.powi(value.exponent()))
+    }
+}
 
 impl Add for Float {
     type Output = Self;
@@ -855,6 +925,12 @@ mod tests {
         }
     }
     
+    fn approx_eqf(val1: f64, val2: f64, error: f64) {
+        if (val1 - val2).abs() / val2 >= error {
+            panic!("Significant difference between values:\n\tval1: {}\n\tval2: {}", val1, val2);
+        }
+    }
+
     fn test_int(val1: u128, val2: u128, result: u128, operation: fn(Float, Float) -> Float) {
         assert_eq!(
             operation(Float::from_int(val1), Float::from_int(val2)),
@@ -995,6 +1071,70 @@ mod tests {
     #[should_panic]
     fn from_ratio_zero() {
         Float::from_ratio(17, 0);
+    }
+
+    #[test]
+    fn float_out_int() {
+        assert_eq!(u128::try_from(Float::from_int(5)).unwrap(), 5u128);
+        assert_eq!(u128::try_from(Float::from_int(123456789)).unwrap(), 123456789u128);
+        assert_eq!(u128::try_from(Float::zero()).unwrap(), 0);
+        assert_eq!(
+            u128::try_from(Float::from_int(100_000_000_000_000_000_000_000_000_000_000_000_000u128)).unwrap(),
+            100_000_000_000_000_000_000_000_000_000_000_000_000u128,
+        );
+        // right to the first 18 digits
+        assert_eq!(
+            u128::try_from(Float::from_int(u128::MAX)).unwrap(), 
+            u128::MAX / 100_000_000_000_000_000_000 * 100_000_000_000_000_000_000,
+        );
+        assert_eq!(
+            u128::try_from(Float::MAX), 
+            Err(ConversionOverflowError::new("Float", "u128", Float::MAX.to_string())),
+        );
+        assert_eq!(u128::try_from(Float::from_float(0.001)).unwrap(), 0);
+        assert_eq!(u128::try_from(Float::MIN).unwrap(), 0);
+        let round = Uint256::from(10u128).pow(59);
+        // right to the frist 18 digits
+        assert_eq!(
+            Uint256::try_from(Float::from(Uint256::MAX)).unwrap(),
+            Uint256::MAX / round * round,
+        );
+    }
+
+    #[test]
+    fn float_out_float() {
+        let error = 0.000000000000001f64; // Close enough
+        approx_eqf(f64::from(Float::from_float(0.1f64)), 0.1, error);
+        approx_eqf(f64::from(Float::from_float(10.0f64)), 10.0, error);
+        approx_eqf(f64::from(Float::from_float(0.4)), 0.4, error);
+        approx_eqf(f64::from(Float::from_float(0.2)), 0.2, error);
+        approx_eqf(f64::from(Float::from_float(0.0001f64)), 0.0001, error);
+        approx_eqf(f64::from(Float::from_float(0.0004f64)), 0.0004, error);
+        approx_eqf(
+            f64::from(Float::from_float(0.0432)), 
+            0.0432,
+            error,
+        );
+        approx_eqf(f64::from(Float::from_float(-1000.001)), 0f64, error);
+        approx_eqf(f64::from(Float::from(0.0)), 0f64, error);
+        approx_eqf(
+            f64::from(Float::from_float(0.0000001234567890123456789111)), 
+            0.0000001234567890123456789,
+            error,
+        );
+        approx_eqf(
+            f64::from(Float::from_float(0.000000000000000000000000000000000000000000000000000000000001f64)),
+            0.000000000000000000000000000000000000000000000000000000000001f64,
+            error,
+        );
+
+        approx_eqf(
+            f64::from(Float::from_float(1000000000000000000000000000000011f64)), 
+            1000000000000000000000000000000011f64,
+            error,
+        );
+        approx_eqf(f64::from(Float::from_float(f64::MAX)), f64::MAX, error);
+        approx_eqf(f64::from(Float::from_float(f64::MIN_POSITIVE)), f64::MIN, error);
     }
 
     #[test]
