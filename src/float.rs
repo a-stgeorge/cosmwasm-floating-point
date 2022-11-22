@@ -8,6 +8,7 @@ use cosmwasm_std::{
     ConversionOverflowError,
     DivideByZeroError, 
     Decimal,
+    Decimal256,
     Isqrt,
     OverflowError, 
     OverflowOperation, 
@@ -376,6 +377,15 @@ impl Float {
         }
     }
 
+    pub fn shift_decimal(&self, amt: i32) -> Result<Self, FloatRangeExceeded> {
+        Ok(Self {
+            significand: self.significand,
+            exponent: self.exponent
+                .checked_add(amt)
+                .ok_or_else(|| FloatRangeExceeded)?,
+        })
+    }
+
     pub fn checked_add(self, other: Self) -> Result<Self, OverflowError> {
         if self.exponent == other.exponent {
             Self {
@@ -640,6 +650,13 @@ impl From<Decimal> for Float {
     }
 }
 
+impl From<Decimal256> for Float {
+    fn from(val: Decimal256) -> Self {
+        Self::from(val.atomics()) 
+            * Self::new(1, -(val.decimal_places() as i32)).unwrap_or_default()
+    }
+}
+
 impl From<u128> for Float {
     fn from(val: u128) -> Self {
         Self::from_int(val)
@@ -709,6 +726,30 @@ impl TryFrom<Float> for Uint256 {
         } else {
             Ok(Uint256::from(value.significand()))
         }
+    }
+}
+
+impl TryFrom<Float> for Decimal {
+    type Error = ConversionOverflowError;
+
+    fn try_from(value: Float) -> Result<Decimal, ConversionOverflowError> {
+        Ok(Decimal::new(
+            Uint128::try_from(value.shift_decimal(18)
+                    .map_err(|_| ConversionOverflowError::new("Float", "Decimal", value.to_string()))?)
+                .map_err(|_| ConversionOverflowError::new("Float", "Decimal", value.to_string()))?,
+        ))
+    }
+}
+
+impl TryFrom<Float> for Decimal256 {
+    type Error = ConversionOverflowError;
+
+    fn try_from(value: Float) -> Result<Decimal256, ConversionOverflowError> {
+        Ok(Decimal256::new(
+            Uint256::try_from(value.shift_decimal(18)
+                    .map_err(|_| ConversionOverflowError::new("Float", "Decimal", value.to_string()))?)
+                .map_err(|_| ConversionOverflowError::new("Float", "Decimal", value.to_string()))?,
+        ))
     }
 }
 
@@ -1065,6 +1106,12 @@ mod tests {
         assert_eq!(Float::from(Decimal::from_atomics(1234u128, 5).unwrap()), Float::new(1234, -5).unwrap());
         assert_eq!(Float::from(Decimal::zero()), Float::zero());
         assert_eq!(Float::from(Decimal::MAX), Float::new(u128::MAX, -18).unwrap());
+
+        assert_eq!(Float::from(Decimal256::percent(100)), Float::new(1, 0).unwrap());
+        assert_eq!(Float::from(Decimal256::percent(1)), Float::new(1, -2).unwrap());
+        assert_eq!(Float::from(Decimal256::from_atomics(1234u128, 5).unwrap()), Float::new(1234, -5).unwrap());
+        assert_eq!(Float::from(Decimal256::zero()), Float::zero());
+        assert_eq!(Float::from(Decimal256::MAX), Float::from(Uint256::MAX) / Float::from_int(10).pow(18));
     }
 
     #[test]
@@ -1098,6 +1145,35 @@ mod tests {
         assert_eq!(
             Uint256::try_from(Float::from(Uint256::MAX)).unwrap(),
             Uint256::MAX / round * round,
+        );
+    }
+
+    #[test]
+    fn float_out_decimal() {
+        assert_eq!(Decimal::try_from(Float::from(Decimal::percent(100))).unwrap(), Decimal::percent(100));
+        assert_eq!(Decimal::try_from(Float::from(Decimal::percent(1))).unwrap(), Decimal::percent(1));
+        assert_eq!(
+            Decimal::try_from(Float::from(Decimal::from_atomics(1234u128, 5).unwrap())).unwrap(),
+            Decimal::from_atomics(1234u128, 5).unwrap()
+        );
+        assert_eq!(Decimal::try_from(Float::from(Decimal::zero())).unwrap(), Decimal::zero());
+        let round = Decimal::from_atomics(100_000_000_000_000_000_000u128, 0).unwrap();
+        assert_eq!(
+            Decimal::try_from(Float::from(Decimal::MAX)).unwrap(),
+            Decimal::MAX / round * round,
+        );
+
+        assert_eq!(Decimal256::try_from(Float::from(Decimal256::percent(100))).unwrap(), Decimal256::percent(100));
+        assert_eq!(Decimal256::try_from(Float::from(Decimal256::percent(1))).unwrap(), Decimal256::percent(1));
+        assert_eq!(
+            Decimal256::try_from(Float::from(Decimal256::from_atomics(1234u128, 5).unwrap())).unwrap(),
+            Decimal256::from_atomics(1234u128, 5).unwrap(),
+        );
+        let round = Decimal256::from_atomics(100_000_000_000_000_000_000_000_000_000u128, 0).unwrap();
+        let round = round * round * Decimal256::from_atomics(10u128, 0).unwrap();
+        assert_eq!(
+            Decimal256::try_from(Float::from(Decimal256::MAX)).unwrap(), 
+            Decimal256::MAX / round * round,
         );
     }
 
