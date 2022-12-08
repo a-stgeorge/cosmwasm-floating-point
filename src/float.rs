@@ -1,5 +1,6 @@
 use forward_ref::{forward_ref_binop, forward_ref_op_assign};
 use std::fmt;
+use std::cmp::Ordering;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign, Rem, RemAssign};
 use thiserror::Error;
 
@@ -57,7 +58,7 @@ fn ilog10(value: u128) -> u32 {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd)]
 pub struct Float {
     exponent: i32, // Exponent first so PartialOrd works
     significand: u128,
@@ -418,7 +419,8 @@ impl Float {
     pub fn checked_sub(self, other: Self) -> Result<Self, OverflowError> {
         if self.exponent == other.exponent {
             Self {
-                significand: self.significand - other.significand,
+                significand: self.significand.checked_sub(other.significand)
+                    .ok_or_else(|| OverflowError::new(OverflowOperation::Sub, self, other))?,
                 exponent: self.exponent,
             }.fix().map_err(|_| OverflowError::new(OverflowOperation::Sub, self, other))
         } else if self.exponent > other.exponent {
@@ -428,11 +430,16 @@ impl Float {
             }
 
             Self {
-                significand: self.significand - (other.significand / pow10(delta)),
+                significand: self.significand.checked_sub(other.significand / pow10(delta))
+                    .ok_or_else(|| OverflowError::new(OverflowOperation::Sub, self, other))?,
                 exponent: self.exponent,
             }.fix().map_err(|_| OverflowError::new(OverflowOperation::Sub, self, other))
         } else {
-            Err(OverflowError::new(OverflowOperation::Sub, self, other))
+            if other.is_zero() { // Only case with no overflow here
+                Ok(self)
+            } else {
+                Err(OverflowError::new(OverflowOperation::Sub, self, other))
+            }
         }
     }
 
@@ -780,6 +787,18 @@ impl From<Float> for f64 {
     }
 }
 
+impl Ord for Float {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.is_zero() {
+            Ordering::Less
+        } else if other.is_zero() {
+            Ordering::Greater
+        } else {
+            (self.exponent, self.significand).cmp(&(other.exponent, other.significand))
+        }
+    }
+}
+
 impl Add for Float {
     type Output = Self;
     
@@ -841,7 +860,11 @@ impl Sub for Float {
                 exponent: self.exponent,
             }.unchecked_fix()
         } else {
-            panic!("attempt to subtract with overflow"); // other is bigger than self
+            if other.is_zero() { // only case where other is smaller here
+                self
+            } else {
+                panic!("attempt to subtract with overflow"); 
+            }
         }
     }
 }

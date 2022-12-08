@@ -374,6 +374,21 @@ fn subtract() {
         Float::new(1, 1000).unwrap().checked_sub(Float::new(1, 0).unwrap()).unwrap(),
         Float::new(1, 1000).unwrap(),
     );
+
+    assert_eq!(
+        Float::from(5u32).checked_sub(Float::from(6u32)),
+        Err(OverflowError::new(OverflowOperation::Sub, Float::from(5u32), Float::from(6u32))),
+    );
+    assert_eq!(
+        Float::zero().checked_sub(Float::from(0.01)),
+        Err(OverflowError::new(OverflowOperation::Sub, Float::zero(), Float::from(0.01))),
+    );
+
+    assert_eq!(
+        Float::from(0.01).checked_sub(Float::zero()).unwrap(),
+        Float::from(0.01),
+    );
+
 }
 
 #[test]
@@ -727,6 +742,12 @@ fn ordering() {
     assert!(Float::new(1234567890123456789, 17).unwrap() < Float::new(1234567891000000000, 17).unwrap());
     assert!(Float::new(1234567890123456789, 17).unwrap() <= Float::new(1234567891000000000, 17).unwrap());
     assert!(Float::new(1234567890123456789, 17).unwrap() == Float::new(1234567890123456789, 17).unwrap());
+    
+    assert!(Float::zero() < Float::one());
+    assert!(Float::one() > Float::zero());
+    assert!(Float::from(100u32) > Float::one());
+    assert!(Float::from(0.01) < Float::one());
+    assert!(Float::from(0.0005) < Float::from(0.0006));
 }
 
 #[test]
@@ -829,21 +850,22 @@ fn saturating() {
 
 #[test]
 fn ilog_10() {
-assert_eq!(ilog10(0u128), 0);
-assert_eq!(ilog10(1u128), 0);
+    assert_eq!(ilog10(0u128), 0);
+    assert_eq!(ilog10(1u128), 0);
 
-// Test around powers of 10
-for i in 1..39 {
-    assert_eq!(ilog10(10u128.pow(i) - 1), i - 1);
-    assert_eq!(ilog10(10u128.pow(i)), i);
+    // Test around powers of 10
+    for i in 1..39 {
+        assert_eq!(ilog10(10u128.pow(i) - 1), i - 1);
+        assert_eq!(ilog10(10u128.pow(i)), i);
+    }
+
+    // Test around powers of 2
+    for i in 1..127 {
+        assert_eq!(ilog10(2u128.pow(i) - 1), ((2u128.pow(i) - 1) as f64).log10().floor() as u32);
+        assert_eq!(ilog10(2u128.pow(i)), (2u128.pow(i) as f64).log10().floor() as u32);
+    }
+
+    assert_eq!(ilog10(u128::MAX), 38);
 }
 
-// Test around powers of 2
-for i in 1..127 {
-    assert_eq!(ilog10(2u128.pow(i) - 1), ((2u128.pow(i) - 1) as f64).log10().floor() as u32);
-    assert_eq!(ilog10(2u128.pow(i)), (2u128.pow(i) as f64).log10().floor() as u32);
-}
-
-assert_eq!(ilog10(u128::MAX), 38);
-}
 
